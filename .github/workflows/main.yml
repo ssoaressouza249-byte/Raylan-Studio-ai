@@ -24,13 +24,16 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Descompactar ZIP e Compilar Raylan Studio AI
+      - name: Descompactar ZIP, Atualizar Modelo Gemini 3.8 e Compilar
         run: |
           mkdir -p projeto_extraido
           unzip -o "*.zip" -d projeto_extraido
           PROJECT_DIR=$(dirname "$(find projeto_extraido -name "settings.gradle.kts" | head -n 1)")
           echo "Projeto encontrado em: $PROJECT_DIR"
           cd "$PROJECT_DIR"
+
+          # Atualiza automaticamente o modelo da API para gemini-3.8-flash
+          sed -i 's/gemini-2.5-flash/gemini-3.8-flash/g' app/src/main/java/com/raylan/studioai/generator/GeminiAppGenerator.kt
 
           cat << 'EOF' > build.gradle.kts
           plugins {
