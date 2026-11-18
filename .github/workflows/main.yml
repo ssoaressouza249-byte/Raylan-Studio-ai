@@ -1,226 +1,52 @@
-name: Compilar Raylan Studio AI APK
+name: Build iPhone Secreto IPA
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-ios:
+    runs-on: macos-latest
 
     steps:
-      - name: Baixar repositorio
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configurar Java 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Configurar Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
-
-      - name: Descompactar ZIP, Atualizar UI e Compilar APK
+      - name: Unzip project if needed
         run: |
-          mkdir -p projeto_extraido
-          unzip -o "*.zip" -d projeto_extraido
-          PROJECT_DIR=$(dirname "$(find projeto_extraido -name "settings.gradle.kts" | head -n 1)")
-          echo "Projeto encontrado em: $PROJECT_DIR"
-          cd "$PROJECT_DIR"
+          if [ -f "iphone-secreto.zip" ]; then
+            unzip -o iphone-secreto.zip
+          fi
+          rm -rf app gradle build.gradle.kts settings.gradle.kts gradle.properties
 
-          # Garante modelo gemini-3.8-flash atualizado
-          sed -i 's/gemini-2.5-flash/gemini-3.8-flash/g' app/src/main/java/com/raylan/studioai/generator/GeminiAppGenerator.kt
+      - name: Install XcodeGen
+        run: brew install xcodegen
 
-          # Adiciona bloco de Nome Sugerido + Botao Copiar Workflow no CreateAppScreen.kt
-          cat << 'EOF' > app/src/main/java/com/raylan/studioai/ui/components/GitHubHelperCard.kt
-          package com.raylan.studioai.ui.components
+      - name: Generate Xcode Project
+        run: xcodegen generate
 
-          import android.content.ClipData
-          import android.content.ClipboardManager
-          import android.content.Context
-          import android.widget.Toast
-          import androidx.compose.foundation.BorderStroke
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.ContentCopy
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.Composable
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.platform.LocalContext
-          import androidx.compose.ui.text.font.FontFamily
-          import androidx.compose.ui.text.font.FontWeight
-          import androidx.compose.ui.unit.dp
-          import androidx.compose.ui.unit.sp
-          import com.raylan.studioai.export.ProjectZipExporter
-          import com.raylan.studioai.ui.theme.*
+      - name: Build Unsigned App
+        run: |
+          xcodebuild -project iPhoneSecreto.xcodeproj \
+            -scheme iPhoneSecreto \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
 
-          @Composable
-          fun GitHubHelperCard(appName: String, modifier: Modifier = Modifier) {
-              val context = LocalContext.current
-              val repoSlug = ProjectZipExporter.slugifyAppName(appName)
-              val workflowYaml = """
-          name: Compilar App Raylan Studio
-          on:
-            push:
-              branches: [ "main", "master" ]
-            workflow_dispatch:
-          jobs:
-            build:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v4
-                - uses: actions/setup-java@v4
-                  with:
-                    java-version: '17'
-                    distribution: 'temurin'
-                - uses: gradle/actions/setup-gradle@v4
-                  with:
-                    gradle-version: '9.3.1'
-                - run: |
-                    mkdir -p app_gerado
-                    unzip -o "*.zip" -d app_gerado
-                    cd "${'$'}(dirname "${'$'}(find app_gerado -name "settings.gradle.kts" | head -n 1)")"
-                    gradle assembleDebug --no-daemon
-                - uses: actions/upload-artifact@v4
-                  with:
-                    name: ${repoSlug}-APK
-                    path: "**/app/build/outputs/apk/debug/*.apk"
-              """.trimIndent()
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/iPhoneSecreto.app Payload/
+          zip -r iPhoneSecreto.ipa Payload
 
-              StudioCard(modifier = modifier, borderColor = SkyBlueAccent.copy(alpha = 0.5f)) {
-                  Text("Pronto para o GitHub", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                  Spacer(Modifier.height(6.dp))
-                  Row(
-                      modifier = Modifier.fillMaxWidth(),
-                      verticalAlignment = Alignment.CenterVertically,
-                      horizontalArrangement = Arrangement.SpaceBetween
-                  ) {
-                      Column(modifier = Modifier.weight(1f)) {
-                          Text("Nome do Repositório:", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                          Text(repoSlug, style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace), color = SkyBlueAccent)
-                      }
-                      OutlinedButton(
-                          onClick = {
-                              val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                              cb.setPrimaryClip(ClipData.newPlainText("Repo", repoSlug))
-                              Toast.makeText(context, "Nome copiado: $repoSlug", Toast.LENGTH_SHORT).show()
-                          },
-                          border = BorderStroke(1.dp, SkyBlueAccent),
-                          shape = RoundedCornerShape(10.dp)
-                      ) {
-                          Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp), tint = SkyBlueAccent)
-                          Spacer(Modifier.width(4.dp))
-                          Text("Copiar Nome", color = SkyBlueAccent, fontSize = 12.sp)
-                      }
-                  }
-                  Spacer(Modifier.height(10.dp))
-                  Button(
-                      onClick = {
-                          val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                          cb.setPrimaryClip(ClipData.newPlainText("Workflow", workflowYaml))
-                          Toast.makeText(context, "Workflow build.yml copiado!", Toast.LENGTH_SHORT).show()
-                      },
-                      colors = ButtonDefaults.buttonColors(containerColor = SlateSurfaceElevated, contentColor = EmeraldAccent),
-                      border = BorderStroke(1.dp, EmeraldAccent.copy(alpha = 0.5f)),
-                      shape = RoundedCornerShape(10.dp),
-                      modifier = Modifier.fillMaxWidth()
-                  ) {
-                      Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                      Spacer(Modifier.width(6.dp))
-                      Text("Copiar Código build.yml do GitHub", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                  }
-              }
-          }
-          EOF
-
-          # Injeta o GitHubHelperCard logo apos o botao BAIXAR PROJETO .ZIP no CreateAppScreen.kt
-          python3 -c '
-          path = "app/src/main/java/com/raylan/studioai/ui/screens/CreateAppScreen.kt"
-          with open(path, "r") as f:
-              code = f.read()
-          code = code.replace(
-              "import com.raylan.studioai.ui.components.GeneratedFileRow",
-              "import com.raylan.studioai.ui.components.GeneratedFileRow\nimport com.raylan.studioai.ui.components.GitHubHelperCard"
-          )
-          target = "            items(\n                items = generatedProject.files,"
-          injection = "            item(key = \"github_helper_card\") {\n                GitHubHelperCard(\n                    appName = generatedProject.appName,\n                    modifier = Modifier.widthIn(max = 720.dp)\n                )\n            }\n" + target
-          code = code.replace(target, injection, 1)
-          with open(path, "w") as f:
-              f.write(code)
-          '
-
-          cat << 'EOF' > build.gradle.kts
-          plugins {
-            alias(libs.plugins.android.application) apply false
-            alias(libs.plugins.kotlin.compose) apply false
-          }
-          EOF
-
-          cat << 'EOF' > app/build.gradle.kts
-          plugins {
-            alias(libs.plugins.android.application)
-            alias(libs.plugins.kotlin.compose)
-          }
-
-          android {
-            namespace = "com.raylan.studioai"
-            compileSdk = 36
-
-            defaultConfig {
-              applicationId = "com.raylan.studioai"
-              minSdk = 26
-              targetSdk = 36
-              versionCode = 1
-              versionName = "1.0"
-            }
-
-            buildTypes {
-              release { isMinifyEnabled = false }
-              debug { isMinifyEnabled = false }
-            }
-
-            compileOptions {
-              sourceCompatibility = JavaVersion.VERSION_11
-              targetCompatibility = JavaVersion.VERSION_11
-            }
-
-            buildFeatures {
-              compose = true
-              buildConfig = true
-            }
-          }
-
-          dependencies {
-            implementation(platform(libs.androidx.compose.bom))
-            implementation(libs.androidx.activity.compose)
-            implementation(libs.androidx.compose.material.icons.core)
-            implementation(libs.androidx.compose.material.icons.extended)
-            implementation(libs.androidx.compose.material3)
-            implementation(libs.androidx.compose.ui)
-            implementation(libs.androidx.compose.ui.graphics)
-            implementation(libs.androidx.compose.ui.tooling.preview)
-            implementation(libs.androidx.core.ktx)
-            implementation(libs.androidx.datastore.preferences)
-            implementation(libs.androidx.lifecycle.runtime.compose)
-            implementation(libs.androidx.lifecycle.runtime.ktx)
-            implementation(libs.androidx.lifecycle.viewmodel.compose)
-            implementation(libs.kotlinx.coroutines.android)
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.okhttp)
-          }
-          EOF
-
-          gradle assembleDebug --no-daemon
-
-      - name: Disponibilizar APK para Download
+      - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Raylan-Studio-AI-APK
-          path: "**/app/build/outputs/apk/debug/*.apk"
+          name: iPhoneSecreto-IPA
+          path: iPhoneSecreto.ipa
           
